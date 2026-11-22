@@ -16,6 +16,10 @@ import {
   esCancionParaRevisar
 } from './utils/libraryMigration';
 import { validarCancionConMusicBrainz } from './utils/metadataValidator';
+import {
+  importarArchivosMusicaPropia,
+  type ProgresoImportacion
+} from './utils/localMusicImporter';
 import { SearchSuggestions } from './components/SearchSuggestions';
 import { useRadioInfinita } from './utils/useRadioInfinita';
 import { validarConexionStorage } from './utils/storageManager';
@@ -106,6 +110,7 @@ interface Cancion {
   fecha?: number;
   caratula?: string;
   artista?: string;
+  album?: string;
   exportada?: boolean; // Marca de estado para control de duplicados y sincronización
   descargada?: boolean; // Descargada explícitamente por el usuario en la app
   origen?: 'descarga' | 'local_importada' | 'cache' | 'dispositivo_permanente';
@@ -1356,6 +1361,7 @@ function App() {
             fecha: item.fecha || Date.now(),
             caratula: item.caratula,
             artista: item.artista,
+            album: item.album,
             exportada: !!item.exportada,
             descargada: item.descargada !== false,
             origen: item.origen || 'descarga',
@@ -1434,6 +1440,9 @@ function App() {
   const [importandoColaSpotify, setImportandoColaSpotify] = useState<boolean>(false);
   const [reemplazandoCancionNombre, setReemplazandoCancionNombre] = useState<string | null>(null);
   const [reparandoBiblioteca, setReparandoBiblioteca] = useState<boolean>(false);
+  const [importandoMusicaPropia, setImportandoMusicaPropia] = useState<boolean>(false);
+  const [progresoImportacion, setProgresoImportacion] = useState<ProgresoImportacion | null>(null);
+  const inputImportarMusicaRef = useRef<HTMLInputElement | null>(null);
   const [modalOriginalAbierto, setModalOriginalAbierto] = useState<boolean>(false);
   const [cancionParaOriginal, setCancionParaOriginal] = useState<Cancion | null>(null);
   const [candidatosOriginales, setCandidatosOriginales] = useState<Array<{
@@ -2351,6 +2360,7 @@ function App() {
         fecha: c.fecha || Date.now(),
         caratula: c.caratula,
         artista: c.artista,
+        album: c.album,
         exportada: !!c.exportada,
         descargada: c.descargada !== false,
         origen: c.origen || 'descarga',
@@ -2382,6 +2392,7 @@ function App() {
             fecha: item.fecha || Date.now(),
             caratula: item.caratula,
             artista: item.artista,
+            album: item.album,
             exportada: !!item.exportada,
             descargada: item.descargada !== false,
             origen: item.origen || 'descarga',
@@ -6888,6 +6899,54 @@ function App() {
 
   const forzarRecargaLimpia = forzarComprobacionActualizacion;
 
+  // Importar música propia desde el teléfono (MP3, M4A, FLAC, OGG, WAV)
+  const manejarImportarMusicaPropia = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files ? Array.from(e.target.files) : [];
+    e.target.value = '';
+    if (files.length === 0) return;
+
+    setImportandoMusicaPropia(true);
+    setProgresoImportacion({ actual: 0, total: files.length, archivo: files[0].name });
+    try {
+      const resumen = await importarArchivosMusicaPropia(
+        files,
+        bibliotecaRef.current,
+        (prog) => setProgresoImportacion(prog)
+      );
+
+      if (resumen.importadas.length > 0) {
+        setBiblioteca((prev) => {
+          const existentes = new Set(prev.map((c) => c.nombre));
+          const nuevas: Cancion[] = resumen.importadas
+            .filter((imp) => !existentes.has(imp.nombre))
+            .map((imp) => ({
+              ...imp,
+              tituloLower: normalizarParaBusqueda(imp.nombre),
+              artistaLower: normalizarParaBusqueda(imp.artista)
+            }));
+          const combinada = [...nuevas, ...prev];
+          combinada.sort((a, b) => a.nombre.localeCompare(b.nombre));
+          guardarCatalogoLigero(combinada);
+          return combinada;
+        });
+      }
+
+      const partes: string[] = [];
+      if (resumen.importadas.length > 0) partes.push(`${resumen.importadas.length} importada(s)`);
+      if (resumen.duplicadas > 0) partes.push(`${resumen.duplicadas} duplicada(s) omitida(s)`);
+      if (resumen.errores > 0) partes.push(`${resumen.errores} con error`);
+      mostrarToast(
+        partes.length > 0 ? `✓ Importación: ${partes.join(', ')}` : 'No se importaron archivos compatibles',
+        resumen.importadas.length > 0 ? 'exito' : 'info'
+      );
+    } catch (err: any) {
+      mostrarToast(`Error importando música: ${err?.message || 'desconocido'}`, 'error');
+    } finally {
+      setImportandoMusicaPropia(false);
+      setProgresoImportacion(null);
+    }
+  };
+
   // Marcar una canción como verificada manualmente desde Revisar biblioteca
   const marcarCancionComoCorrecta = async (nombre: string) => {
     try {
@@ -10099,6 +10158,32 @@ function App() {
                 Tu Biblioteca
               </h1>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <input
+                  ref={inputImportarMusicaRef}
+                  type="file"
+                  multiple
+                  accept=".mp3,.m4a,.flac,.ogg,.wav,audio/*"
+                  onChange={manejarImportarMusicaPropia}
+                  style={{ display: 'none' }}
+                />
+                <button
+                  onClick={() => inputImportarMusicaRef.current?.click()}
+                  disabled={importandoMusicaPropia}
+                  title="Importar MP3, M4A, FLAC, OGG o WAV desde tu teléfono"
+                  style={{
+                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                    color: '#FFFFFF',
+                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                    borderRadius: '500px',
+                    padding: '8px 14px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: importandoMusicaPropia ? 'wait' : 'pointer',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {importandoMusicaPropia ? 'Importando...' : 'Importar música desde mi teléfono'}
+                </button>
                 <button
                   onClick={activarModoDJ}
                   title="Modo DJ: Mezcla aleatoria continua con Crossfade"
@@ -10206,6 +10291,36 @@ function App() {
             <p style={{ margin: 0, fontSize: '13px', color: '#B3B3B3', lineHeight: '1.4' }}>
               Toda tu música descargada disponible sin internet, listas y mezclas personalizadas.
             </p>
+            {importandoMusicaPropia && progresoImportacion && (
+              <div
+                style={{
+                  marginTop: '12px',
+                  padding: '10px 12px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(30, 215, 96, 0.12)',
+                  border: '1px solid rgba(30, 215, 96, 0.35)'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#FFFFFF', fontWeight: 700, marginBottom: '6px' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '72%' }}>
+                    Importando: {progresoImportacion.archivo}
+                  </span>
+                  <span>
+                    {progresoImportacion.actual} / {progresoImportacion.total}
+                  </span>
+                </div>
+                <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: '999px', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${progresoImportacion.total > 0 ? Math.round((progresoImportacion.actual / progresoImportacion.total) * 100) : 0}%`,
+                      height: '100%',
+                      backgroundColor: '#1ED760',
+                      transition: 'width 0.2s ease'
+                    }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Chips de Filtros Estilo Spotify Pro */}
