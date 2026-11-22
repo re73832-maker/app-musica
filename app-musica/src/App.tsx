@@ -2221,7 +2221,7 @@ function App() {
             setEstaOnline(true);
             try {
               const data = await res.json();
-              if (data && data.version && data.version !== 'v5.1.0 Fix-Btn 🚀') {
+              if (data && data.version && data.version !== 'v5.2.0') {
                 setHayNuevaVersionOta(true);
               }
             } catch (_) {}
@@ -2239,7 +2239,7 @@ function App() {
           if (rSw && rSw.ok) {
             const txt = await rSw.text();
             const m = txt.match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/);
-            if (m && m[1] && m[1] !== 'app-musica-v5.1.0') {
+            if (m && m[1] && m[1] !== 'app-musica-v5.2.0') {
               setHayNuevaVersionOta(true);
             }
           }
@@ -6915,7 +6915,7 @@ function App() {
   };
 
   // Versión identificadora para verificación visual OTA en vivo
-  const VERSION_APP = 'v5.1.0 Fix-Btn 🚀';
+  const VERSION_APP = 'v5.2.0';
 
   // Actualización Total mediante el Botón Interno:
   // Descarga nuevos scripts, purga el CacheStorage / ServiceWorker de forma segura
@@ -6991,20 +6991,31 @@ function App() {
   }, []);
 
   const manejarBuscarActualizacionOta = async () => {
-    const res = await revisarActualizacionOta({
-      silencioso: false,
-      onEstado: (est, msg) => {
-        setEstadoOta(est);
-        setMensajeOta(msg);
+    try {
+      const res = await revisarActualizacionOta({
+        silencioso: false,
+        onEstado: (est, msg) => {
+          setEstadoOta(est);
+          setMensajeOta(msg);
+        }
+      });
+      if (res.usarRespaldoLegacy) {
+        mostrarToast(res.mensaje || 'Actualizando desde Render...', 'info');
+        await forzarComprobacionActualizacion();
+        return;
       }
-    });
-    if (res.estado === 'actualizada') {
-      mostrarToast(res.mensaje, 'exito');
-      forzarComprobacionActualizacion();
-    } else if (res.estado === 'descargando') {
-      mostrarToast(res.mensaje, 'info');
-    } else if (res.estado === 'error') {
-      mostrarToast(res.mensaje, 'error');
+      if (res.estado === 'actualizada') {
+        mostrarToast(res.mensaje, 'exito');
+      } else if (res.estado === 'descargando') {
+        mostrarToast(res.mensaje, 'info');
+      } else if (res.estado === 'error') {
+        mostrarToast(res.mensaje, 'error');
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'Error al buscar actualización';
+      setEstadoOta('error');
+      setMensajeOta(`Error: ${msg}`);
+      mostrarToast(`Error: ${msg}`, 'error');
     }
   };
 
@@ -11737,22 +11748,31 @@ function App() {
             </p>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <button
-                onClick={forzarComprobacionActualizacion}
+                onClick={manejarBuscarActualizacionOta}
+                disabled={estadoOta === 'checking' || estadoOta === 'descargando'}
                 style={{
-                  backgroundColor: '#1ED760',
-                  color: '#000000',
+                  backgroundColor: estadoOta === 'error' ? '#EF4444' : '#1ED760',
+                  color: estadoOta === 'error' ? '#FFFFFF' : '#000000',
                   border: 'none',
                   borderRadius: '500px',
                   padding: '9px 18px',
                   fontSize: '12px',
                   fontWeight: '700',
-                  cursor: 'pointer',
+                  cursor: estadoOta === 'checking' || estadoOta === 'descargando' ? 'wait' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px'
                 }}
               >
-                <span>🔄 Buscar Actualización</span>
+                <span>
+                  {estadoOta === 'descargando'
+                    ? 'Descargando...'
+                    : estadoOta === 'checking'
+                    ? 'Buscando...'
+                    : estadoOta === 'error'
+                    ? '⚠️ Error (Reintentar)'
+                    : '🔄 Buscar Actualización'}
+                </span>
               </button>
 
               <button
@@ -11784,7 +11804,7 @@ function App() {
               Dev: <strong style={{ color: '#FFFFFF', fontWeight: '700' }}>JC Sanchez Reyes</strong>
             </p>
             <p style={{ margin: 0, fontSize: '12px', color: '#94A3B8' }}>
-              v5.1.0 Fix-Btn 🚀 • (2026) • Selector Auditivo 10s + Reemplazo Real en IndexedDB
+              v5.2.0 • (2026) • Verificación MusicBrainz + Importación Local + Pre-escucha 15s + OTA
             </p>
           </div>
         </div>
