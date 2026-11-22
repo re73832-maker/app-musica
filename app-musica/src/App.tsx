@@ -10,6 +10,7 @@ import { ColaReproduccionModal } from './components/ColaReproduccionModal';
 import { useHistorialEscucha } from './utils/useHistorialEscucha';
 import { EscuchadoRecientemente } from './components/EscuchadoRecientemente';
 import { RevisarBiblioteca } from './components/RevisarBiblioteca';
+import { PreescuchaModal, type DatosPreescucha } from './components/PreescuchaModal';
 import {
   migrarBibliotecaIndexedDB,
   detectarSospechaInicial,
@@ -1440,6 +1441,9 @@ function App() {
   const [importandoColaSpotify, setImportandoColaSpotify] = useState<boolean>(false);
   const [reemplazandoCancionNombre, setReemplazandoCancionNombre] = useState<string | null>(null);
   const [reparandoBiblioteca, setReparandoBiblioteca] = useState<boolean>(false);
+  const [preescuchaPendiente, setPreescuchaPendiente] = useState<DatosPreescucha | null>(null);
+  const [guardandoPreescucha, setGuardandoPreescucha] = useState<boolean>(false);
+  const [cancionAReemplazarClave, setCancionAReemplazarClave] = useState<string | null>(null);
   const [importandoMusicaPropia, setImportandoMusicaPropia] = useState<boolean>(false);
   const [progresoImportacion, setProgresoImportacion] = useState<ProgresoImportacion | null>(null);
   const inputImportarMusicaRef = useRef<HTMLInputElement | null>(null);
@@ -5328,49 +5332,34 @@ function App() {
         setTimeout(() => URL.revokeObjectURL(urlBlob), 5000);
         mostrarToast(`✓ Video descargado con éxito: "${item.title}.mp4"`, 'exito');
       } else {
-        // Para música, guardar en biblioteca local permanente IndexedDB verificando duración completa
+        // Para música, abrir pre-escucha de 15 s antes de guardar en IndexedDB y /Music/AppMusica/
         const duracionReal = (await obtenerDuracionDeBlob(blobAdecuado)) || item.seconds || 0;
         if (duracionReal > 0 && duracionReal < 45) {
           throw new Error(`Pista truncada de vista previa detectada (${Math.round(duracionReal)}s). Solo se permiten canciones completas.`);
         }
 
-        const cancionNueva: Cancion = {
-          nombre: item.title,
-          blob: blobAdecuado,
-          tamano: blobAdecuado.size,
-          duracion: duracionReal,
-          favorito: false,
-          fecha: Date.now(),
-          caratula: item.thumbnail,
+        const claveReemplazo = cancionAReemplazarClave;
+        const originalExistente = claveReemplazo
+          ? bibliotecaRef.current.find((c) => c.nombre === claveReemplazo)
+          : undefined;
+
+        setPreescuchaPendiente({
+          titulo: item.title,
           artista: item.artist,
-          exportada: false,
-          descargada: true,
-          origen: 'descarga',
-          verified: false,
-          sourceVersion: 'descarga_web',
-          durationExpected: item.seconds > 0 ? item.seconds : undefined,
-          durationActual: duracionReal,
-          flagReason: detectarSospechaInicial(item.title, item.artist)
-        };
-
-        await localforage.setItem(item.title, cancionNueva);
-        mostrarToast(`✓ Descarga completada: "${item.title}"`, 'exito');
-
-        // Auto-blindaje permanente en la memoria física del teléfono (/Music/AppMusica/)
-        // Inmune a desinstalación de la app o borrado de caché
-        if (esAlmacenamientoNativoDisponible()) {
-          blindarCancionEnMemoriaFisica(cancionNueva, blobAdecuado).then((res) => {
-            if (res.ok) {
-              console.log(`[Blindaje]: ✓ "${item.title}" blindada en almacenamiento físico permanente.`);
-            }
-          }).catch((e) => console.warn('[Blindaje]: Aviso al blindar:', e));
-        }
-        setBiblioteca((prev) => {
-          const nuevaSin = prev.filter((c) => c.nombre !== item.title);
-          const lista = [cancionNueva, ...nuevaSin];
-          guardarCatalogoLigero(lista);
-          return lista;
+          caratula: item.thumbnail,
+          blob: blobAdecuado,
+          duracionReal,
+          duracionEsperada:
+            originalExistente?.durationExpected && originalExistente.durationExpected > 0
+              ? originalExistente.durationExpected
+              : item.seconds > 0
+              ? item.seconds
+              : undefined,
+          modoReemplazo: Boolean(claveReemplazo),
+          reemplazarClaveOriginal: claveReemplazo || undefined,
+          sourceVersion: claveReemplazo ? 'reemplazo_manual' : 'descarga_web'
         });
+        mostrarToast('🎧 Escucha la vista previa de 15 s y confirma para guardar', 'info');
       }
     } catch (error: any) {
       if (error.name === 'AbortError' || error.message?.includes('cancelada') || controller.signal.aborted) {
@@ -6357,8 +6346,85 @@ function App() {
   const reemplazarOriginalRef = useRef(reemplazarCancionConOriginal);
   reemplazarOriginalRef.current = reemplazarCancionConOriginal;
   const alReemplazarOriginalFila = useCallback((cancion: Cancion, e: React.MouseEvent) => {
-    reemplazarOriginalRef.current(cancion, e);
+    if (e) e.stopPropagation();
+    setCancionAReemplazarClave(cancion.nombre);
+    const query = `${cancion.nombre} ${cancion.artista || ''}`.trim();
+    setBusquedaWeb(query);
+    setTabActiva('buscar');
+    mostrarToast(`Elige una nueva versión para "${cancion.nombre}"`, 'info');
   }, []);
+
+  const confirmarGuardarPreescucha = async (datos: DatosPreescucha) => {
+    setGuardandoPreescucha(true);
+    try {
+      const esReemplazo = Boolean(datos.modoReemplazo && datos.reemplazarClaveOriginal);
+      const claveObjetivo = esReemplazo ? datos.reemplazarClaveOriginal! : datos.titulo;
+      const existenteDb: any = esReemplazo
+        ? await localforage.getItem(claveObjetivo).catch(() => null)
+        : null;
+      const existenteLista = esReemplazo
+        ? bibliotecaRef.current.find((c) => c.nombre === claveObjetivo)
+        : undefined;
+
+      const cancionFinal: Cancion = {
+        nombre: claveObjetivo,
+        blob: datos.blob,
+        tamano: datos.blob.size,
+        duracion: datos.duracionReal,
+        favorito: existenteDb?.favorito ?? existenteLista?.favorito ?? false,
+        fecha: Date.now(),
+        caratula: datos.caratula || existenteDb?.caratula || existenteLista?.caratula,
+        artista: datos.artista || existenteDb?.artista || existenteLista?.artista,
+        album: existenteDb?.album || existenteLista?.album,
+        exportada: existenteDb?.exportada ?? existenteLista?.exportada ?? false,
+        descargada: true,
+        origen: (existenteDb?.origen || existenteLista?.origen || 'descarga') as Cancion['origen'],
+        verified: esReemplazo ? true : false,
+        sourceVersion: datos.sourceVersion || (esReemplazo ? 'reemplazo_manual' : 'descarga_web'),
+        durationExpected:
+          datos.duracionEsperada && datos.duracionEsperada > 0
+            ? datos.duracionEsperada
+            : existenteDb?.durationExpected ?? existenteLista?.durationExpected,
+        durationActual: datos.duracionReal,
+        durationMatch:
+          datos.duracionEsperada && datos.duracionEsperada > 0
+            ? Math.abs(datos.duracionReal - datos.duracionEsperada) <= 5
+            : existenteDb?.durationMatch,
+        flagReason: esReemplazo ? undefined : detectarSospechaInicial(claveObjetivo, datos.artista)
+      };
+
+      await localforage.setItem(claveObjetivo, cancionFinal);
+
+      if (esAlmacenamientoNativoDisponible()) {
+        blindarCancionEnMemoriaFisica(cancionFinal, datos.blob).catch((err) =>
+          console.warn('[Blindaje]: Aviso al blindar:', err)
+        );
+      }
+
+      const { blob: _omitBlob, ...ligera } = cancionFinal;
+      setBiblioteca((prev) => {
+        const filtrada = prev.filter((c) => c.nombre !== claveObjetivo);
+        const lista = esReemplazo
+          ? prev.map((c) => (c.nombre === claveObjetivo ? ligera : c))
+          : [ligera, ...filtrada];
+        guardarCatalogoLigero(lista);
+        return lista;
+      });
+
+      setPreescuchaPendiente(null);
+      setCancionAReemplazarClave(null);
+      mostrarToast(
+        esReemplazo
+          ? `✓ "${claveObjetivo}" reemplazada conservando favoritos y playlists`
+          : `✓ Descarga guardada: "${claveObjetivo}"`,
+        'exito'
+      );
+    } catch (err: any) {
+      mostrarToast(`Error guardando canción: ${err?.message || 'desconocido'}`, 'error');
+    } finally {
+      setGuardandoPreescucha(false);
+    }
+  };
 
 
 
@@ -9147,6 +9213,40 @@ function App() {
           }}
         >
           <div style={{ marginBottom: '22px' }}>
+            {cancionAReemplazarClave && (
+              <div
+                style={{
+                  marginBottom: '12px',
+                  padding: '10px 14px',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(59, 130, 246, 0.16)',
+                  border: '1px solid rgba(59, 130, 246, 0.4)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '10px'
+                }}
+              >
+                <span style={{ fontSize: '12px', color: '#93C5FD', fontWeight: 700 }}>
+                  Reemplazando versión de: "{cancionAReemplazarClave}"
+                </span>
+                <button
+                  onClick={() => setCancionAReemplazarClave(null)}
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: '1px solid rgba(147, 197, 253, 0.45)',
+                    color: '#93C5FD',
+                    borderRadius: '999px',
+                    padding: '4px 10px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '8px' }}>
               <span className="hero-subtitle-badge">
                 <span>⚡ SPOTIFY PRO SEARCH</span>
@@ -10142,6 +10242,40 @@ function App() {
           
           {/* Cabecera Hero con Badge de Biblioteca */}
           <div style={{ marginBottom: '22px' }}>
+            {cancionAReemplazarClave && (
+              <div
+                style={{
+                  marginBottom: '12px',
+                  padding: '10px 14px',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(59, 130, 246, 0.16)',
+                  border: '1px solid rgba(59, 130, 246, 0.4)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '10px'
+                }}
+              >
+                <span style={{ fontSize: '12px', color: '#93C5FD', fontWeight: 700 }}>
+                  Reemplazando versión de: "{cancionAReemplazarClave}"
+                </span>
+                <button
+                  onClick={() => setCancionAReemplazarClave(null)}
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: '1px solid rgba(147, 197, 253, 0.45)',
+                    color: '#93C5FD',
+                    borderRadius: '999px',
+                    padding: '4px 10px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '8px' }}>
               <span className="hero-subtitle-badge">
                 <span>📁 COLECCIÓN LOCAL</span>
@@ -13578,6 +13712,22 @@ function App() {
       {/* ========================================================================= */}
       {/* PANEL DE COLA DE REPRODUCCIÓN (DRAWER OFICIAL UP NEXT SPOTIFY)            */}
       {/* ========================================================================= */}
+      <PreescuchaModal
+        datos={preescuchaPendiente}
+        guardando={guardandoPreescucha}
+        onGuardar={confirmarGuardarPreescucha}
+        onDescartar={() => {
+          setPreescuchaPendiente(null);
+          setCancionAReemplazarClave(null);
+          mostrarToast('Vista previa descartada', 'info');
+        }}
+        onBuscarOtraVersion={(datos) => {
+          setPreescuchaPendiente(null);
+          setBusquedaWeb(`${datos.titulo} ${datos.artista || ''}`.trim());
+          setTabActiva('buscar');
+        }}
+      />
+
       <ColaReproduccionModal
         abierto={modalColaAbierto}
         alCerrar={alCerrarModalCola}
