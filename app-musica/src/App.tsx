@@ -21,6 +21,11 @@ import {
   importarArchivosMusicaPropia,
   type ProgresoImportacion
 } from './utils/localMusicImporter';
+import {
+  notificarOtaLista,
+  revisarActualizacionOta,
+  type EstadoOta
+} from './utils/otaUpdater';
 import { SearchSuggestions } from './components/SearchSuggestions';
 import { useRadioInfinita } from './utils/useRadioInfinita';
 import { validarConexionStorage } from './utils/storageManager';
@@ -1448,6 +1453,8 @@ function App() {
   const [preescuchaPendiente, setPreescuchaPendiente] = useState<DatosPreescucha | null>(null);
   const [guardandoPreescucha, setGuardandoPreescucha] = useState<boolean>(false);
   const [cancionAReemplazarClave, setCancionAReemplazarClave] = useState<string | null>(null);
+  const [estadoOta, setEstadoOta] = useState<EstadoOta>('idle');
+  const [mensajeOta, setMensajeOta] = useState<string>('');
   const [importandoMusicaPropia, setImportandoMusicaPropia] = useState<boolean>(false);
   const [progresoImportacion, setProgresoImportacion] = useState<ProgresoImportacion | null>(null);
   const inputImportarMusicaRef = useRef<HTMLInputElement | null>(null);
@@ -6969,6 +6976,38 @@ function App() {
 
   const forzarRecargaLimpia = forzarComprobacionActualizacion;
 
+  useEffect(() => {
+    notificarOtaLista().catch(() => {});
+    const timerOta = window.setTimeout(() => {
+      revisarActualizacionOta({
+        silencioso: true,
+        onEstado: (est, msg) => {
+          setEstadoOta(est);
+          setMensajeOta(msg);
+        }
+      }).catch(() => {});
+    }, 2500);
+    return () => window.clearTimeout(timerOta);
+  }, []);
+
+  const manejarBuscarActualizacionOta = async () => {
+    const res = await revisarActualizacionOta({
+      silencioso: false,
+      onEstado: (est, msg) => {
+        setEstadoOta(est);
+        setMensajeOta(msg);
+      }
+    });
+    if (res.estado === 'actualizada') {
+      mostrarToast(res.mensaje, 'exito');
+      forzarComprobacionActualizacion();
+    } else if (res.estado === 'descargando') {
+      mostrarToast(res.mensaje, 'info');
+    } else if (res.estado === 'error') {
+      mostrarToast(res.mensaje, 'error');
+    }
+  };
+
   // Importar música propia desde el teléfono (MP3, M4A, FLAC, OGG, WAV)
   const manejarImportarMusicaPropia = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files ? Array.from(e.target.files) : [];
@@ -10948,26 +10987,50 @@ function App() {
                   {VERSION_APP}
                 </span>
                 <button
-                  onClick={forzarComprobacionActualizacion}
+                  onClick={manejarBuscarActualizacionOta}
+                  disabled={estadoOta === 'checking' || estadoOta === 'descargando'}
                   style={{
-                    backgroundColor: '#1ED760',
-                    color: '#000000',
+                    backgroundColor: estadoOta === 'error' ? '#EF4444' : '#1ED760',
+                    color: estadoOta === 'error' ? '#FFFFFF' : '#000000',
                     border: 'none',
                     borderRadius: '500px',
                     padding: '7px 16px',
                     fontSize: '12px',
                     fontWeight: '800',
-                    cursor: 'pointer',
+                    cursor: estadoOta === 'checking' || estadoOta === 'descargando' ? 'wait' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '5px',
                     boxShadow: '0 2px 10px rgba(30, 215, 96, 0.4)'
                   }}
                 >
-                  <span>🔄 Buscar Actualización</span>
+                  <span>
+                    {estadoOta === 'descargando'
+                      ? 'Descargando...'
+                      : estadoOta === 'checking'
+                      ? 'Buscando...'
+                      : '🔄 Buscar actualización'}
+                  </span>
                 </button>
               </div>
             </div>
+            {mensajeOta && estadoOta !== 'idle' && (
+              <div
+                style={{
+                  marginBottom: '8px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  color:
+                    estadoOta === 'error'
+                      ? '#F87171'
+                      : estadoOta === 'descargando'
+                      ? '#60A5FA'
+                      : '#6EE7B7'
+                }}
+              >
+                {mensajeOta}
+              </div>
+            )}
             <h1 className="hero-gradient-text" style={{ fontSize: '32px', fontWeight: '900', margin: '0 0 6px 0', letterSpacing: '-0.8px' }}>
               Ajustes & Respaldo
             </h1>
