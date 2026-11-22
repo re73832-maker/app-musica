@@ -1,0 +1,19 @@
+# Blueprint declarativo para despliegue automatizado en Render
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: servidor-musica
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: servidor-musica
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000

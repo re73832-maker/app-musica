@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#18181b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Música" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' capacitor: https: http: data: blob: 'unsafe-inline' 'unsafe-eval'; media-src 'self' capacitor: https: http: blob: data:; img-src 'self' capacitor: https: http: data: blob:; connect-src 'self' capacitor: https: http: ws: wss: data: blob:; font-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:;" />
+    
+    <link rel="icon" type="image/png" href="/pwa-192x192.png" />
+    <link rel="apple-touch-icon" href="/pwa-192x192.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <title>Música</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Registrar Service Worker para caché offline total y actualización OTA tanto en web como en Capacitor
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+            .then((registration) => {
+              if (navigator.onLine) {
+                registration.update().catch(() => {});
+              }
+              setInterval(() => {
+                if (navigator.onLine) {
+                  registration.update().catch(() => {});
+                }
+              }, 60000);
+            })
+            .catch(() => {});
+        });
+
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible' && navigator.onLine) {
+            navigator.serviceWorker.getRegistration().then((reg) => {
+              if (reg) reg.update().catch(() => {});
+            });
+          }
+        });
+      }
+    </script>
+  </body>
+</html>

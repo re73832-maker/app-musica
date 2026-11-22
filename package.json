@@ -1,0 +1,13 @@
+{
+  "name": "app-musica-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Monorepo para App Música (Frontend PWA y Servidor Express Unificado)",
+  "scripts": {
+    "build:frontend": "npm run build --prefix app-musica",
+    "start": "npm start --prefix servidor-musica",
+    "tunnel": "ngrok http 4000",
+    "dev:frontend": "npm run dev --prefix app-musica",
+    "dev:backend": "npm run dev --prefix servidor-musica"
+  }
+}

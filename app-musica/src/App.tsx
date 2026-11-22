@@ -5134,14 +5134,24 @@ function App() {
 
       // Resolver ID real de YouTube si la canción proviene de búsqueda Apple iTunes u otro proveedor sin ID directo
       let resolvedVideoId = item.videoId;
-      if (!resolvedVideoId || resolvedVideoId.startsWith('itunes_') || resolvedVideoId.length !== 11) {
+      const esFuenteLicenciada = resolvedVideoId?.startsWith('jamendo:') || resolvedVideoId?.startsWith('ia:');
+      if (!esFuenteLicenciada && (!resolvedVideoId || resolvedVideoId.startsWith('itunes_') || resolvedVideoId.length !== 11)) {
         try {
           setTextoDescarga('Localizando pista completa en YouTube...');
-          const urlBusqueda = obtenerUrlApi(`/api/buscar-canciones?q=${encodeURIComponent(`${item.title} ${item.artist || ''}`.trim())}`);
+          const consultaYt = `${item.title} ${item.artist || ''}`.trim();
+          const urlBusqueda = obtenerUrlApi(`/api/buscar-canciones?q=${encodeURIComponent(consultaYt)}`);
           if (urlBusqueda) {
             const bData = await fetchJsonSeguro<{ resultados?: any[] }>(urlBusqueda, { signal: controller.signal }, 10000);
-            if (bData?.resultados?.length && bData.resultados[0].videoId && bData.resultados[0].videoId.length === 11) {
-              resolvedVideoId = bData.resultados[0].videoId;
+            const matchYt = bData?.resultados?.find((r) => r?.videoId && r.videoId.length === 11 && !r.videoId.startsWith('itunes_'));
+            if (matchYt) {
+              resolvedVideoId = matchYt.videoId;
+            }
+          }
+          if (!resolvedVideoId || resolvedVideoId.startsWith('itunes_') || resolvedVideoId.length !== 11) {
+            const pubRes = await buscarCancionesPublico(consultaYt);
+            const matchPub = pubRes.find((r) => r?.videoId && r.videoId.length === 11 && !r.videoId.startsWith('itunes_'));
+            if (matchPub) {
+              resolvedVideoId = matchPub.videoId;
             }
           }
         } catch (_) {}
