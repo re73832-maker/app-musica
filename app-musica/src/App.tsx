@@ -162,10 +162,14 @@ interface ResultadoBusqueda {
   videoId: string;
   title: string;
   artist: string;
+  author?: string;
+  license?: string;
   timestamp: string;
   seconds: number;
   thumbnail: string;
   previewUrl?: string;
+  streamUrl?: string;
+  sourceVersion?: string;
 }
 
 interface EstadoPreview {
@@ -9828,7 +9832,10 @@ function App() {
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap'
                         }}>
-                          {item.artist || 'Artista'} • <span style={{ color: '#888' }}>⏱ {item.timestamp}</span>
+                          {item.author || item.artist || 'Autor desconocido'} • <span style={{ color: '#888' }}>⏱ {item.timestamp}</span>
+                          {item.license && (
+                            <span style={{ color: '#6EE7B7', marginLeft: '6px' }}>• {item.license}</span>
+                          )}
                         </p>
                       </div>
 
