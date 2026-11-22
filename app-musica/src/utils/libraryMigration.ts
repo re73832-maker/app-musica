@@ -9,6 +9,7 @@ export interface SongVerificationFields {
   sourceVersion: string;
   durationExpected?: number;
   durationActual: number;
+  durationMatch?: boolean;
   flagReason?: string;
 }
 
@@ -84,8 +85,12 @@ export function detectarSospechaInicial(nombre: string, artista?: string): strin
   return undefined;
 }
 
+export function esAlertaSospechosa(cancion: { flagReason?: string }): boolean {
+  return Boolean(cancion.flagReason && cancion.flagReason !== 'sin datos');
+}
+
 export function esCancionParaRevisar(cancion: { verified?: boolean; flagReason?: string }): boolean {
-  return cancion.verified !== true || Boolean(cancion.flagReason);
+  return cancion.verified !== true || esAlertaSospechosa(cancion);
 }
 
 /**

@@ -15,6 +15,7 @@ import {
   detectarSospechaInicial,
   esCancionParaRevisar
 } from './utils/libraryMigration';
+import { validarCancionConMusicBrainz } from './utils/metadataValidator';
 import { SearchSuggestions } from './components/SearchSuggestions';
 import { useRadioInfinita } from './utils/useRadioInfinita';
 import { validarConexionStorage } from './utils/storageManager';
@@ -114,6 +115,7 @@ interface Cancion {
   sourceVersion?: string;
   durationExpected?: number;
   durationActual?: number;
+  durationMatch?: boolean;
   flagReason?: string;
 }
 
@@ -2356,6 +2358,7 @@ function App() {
         sourceVersion: c.sourceVersion || c.origen || 'legacy_indexeddb',
         durationExpected: c.durationExpected,
         durationActual: typeof c.durationActual === 'number' ? c.durationActual : (c.duracion || 0),
+        durationMatch: typeof c.durationMatch === 'boolean' ? c.durationMatch : undefined,
         flagReason: c.flagReason
       }));
       guardarStorageDiferido(CLAVE_CATALOGO_LIGERO, JSON.stringify(datosPlanos));
@@ -2386,6 +2389,7 @@ function App() {
             sourceVersion: item.sourceVersion || item.origen || 'legacy_indexeddb',
             durationExpected: typeof item.durationExpected === 'number' ? item.durationExpected : undefined,
             durationActual: typeof item.durationActual === 'number' ? item.durationActual : (item.duracion || 0),
+            durationMatch: typeof item.durationMatch === 'boolean' ? item.durationMatch : undefined,
             flagReason: item.flagReason,
             tituloLower: normalizarParaBusqueda(item.nombre),
             artistaLower: normalizarParaBusqueda(item.artista)
@@ -2457,6 +2461,27 @@ function App() {
                 durationExpected = typeof valor.durationExpected === 'number' ? valor.durationExpected : undefined;
                 durationActual = typeof valor.durationActual === 'number' ? valor.durationActual : duracion;
                 flagReason = valor.flagReason || (!verified ? detectarSospechaInicial(clave, artista) : undefined);
+                const durationMatchVal = typeof valor.durationMatch === 'boolean' ? valor.durationMatch : undefined;
+
+                mapa.set(clave, {
+                  nombre: clave,
+                  tamano,
+                  duracion,
+                  caratula,
+                  artista,
+                  favorito,
+                  exportada,
+                  fecha,
+                  descargada: true,
+                  origen,
+                  verified,
+                  sourceVersion,
+                  durationExpected,
+                  durationActual,
+                  durationMatch: durationMatchVal,
+                  flagReason
+                });
+                return;
               }
 
               mapa.set(clave, {
@@ -2487,8 +2512,116 @@ function App() {
       listaCompleta.sort((a, b) => a.nombre.localeCompare(b.nombre));
       guardarCatalogoLigero(listaCompleta);
       setBiblioteca(listaCompleta);
+      setTimeout(() => {
+        validarBibliotecaConMusicBrainzEnSegundoPlano(listaCompleta);
+      }, 3000);
     } catch (e) {
       console.warn('[MigracionSegundoPlano]: Error:', e);
+    }
+  };
+
+  const validacionMbEnCursoRef = useRef<boolean>(false);
+  const reintentoMbTimerRef = useRef<number | null>(null);
+
+  // Validación silenciosa en segundo plano contra MusicBrainz vía servidor-musica (lotes de 2)
+  const validarBibliotecaConMusicBrainzEnSegundoPlano = async (listaInicial?: Cancion[]) => {
+    if (validacionMbEnCursoRef.current) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+
+    const base = listaInicial || bibliotecaRef.current;
+    const pendientes = base.filter(
+      (c) =>
+        !c.verified &&
+        typeof c.durationMatch !== 'boolean' &&
+        c.flagReason !== 'sin datos' &&
+        (c.durationActual ?? c.duracion) > 0
+    );
+
+    if (pendientes.length === 0) return;
+
+    validacionMbEnCursoRef.current = true;
+    let fallosRedConsecutivos = 0;
+
+    try {
+      const BATCH = 2;
+      for (let i = 0; i < pendientes.length; i += BATCH) {
+        const lote = pendientes.slice(i, i + BATCH);
+
+        for (const item of lote) {
+          const durReal = item.durationActual ?? item.duracion ?? 0;
+          const res = await validarCancionConMusicBrainz(item.nombre, item.artista, durReal);
+
+          if (res.status === 'retry_later') {
+            fallosRedConsecutivos++;
+            if (fallosRedConsecutivos >= 3) {
+              // Servidor dormido o sin internet: pausar silenciosamente y reintentar después
+              if (reintentoMbTimerRef.current !== null) {
+                window.clearTimeout(reintentoMbTimerRef.current);
+              }
+              reintentoMbTimerRef.current = window.setTimeout(() => {
+                reintentoMbTimerRef.current = null;
+                validarBibliotecaConMusicBrainzEnSegundoPlano();
+              }, 45000);
+              return;
+            }
+            continue;
+          }
+
+          fallosRedConsecutivos = 0;
+
+          const nuevoFlag =
+            res.status === 'matched'
+              ? item.flagReason === 'duración no coincide' || item.flagReason === 'sin datos'
+                ? undefined
+                : item.flagReason
+              : res.flagReason;
+
+          try {
+            const regDb: any = await localforage.getItem(item.nombre);
+            if (regDb && typeof regDb === 'object') {
+              await localforage.setItem(item.nombre, {
+                ...regDb,
+                durationExpected:
+                  typeof res.durationExpected === 'number'
+                    ? res.durationExpected
+                    : regDb.durationExpected,
+                durationMatch:
+                  typeof res.durationMatch === 'boolean' ? res.durationMatch : regDb.durationMatch,
+                flagReason: nuevoFlag
+                // Nunca marcar verified=true automáticamente: se reserva para confirmación manual
+              });
+            }
+          } catch (_) {}
+
+          setBiblioteca((prev) => {
+            const nueva = prev.map((c) =>
+              c.nombre === item.nombre
+                ? {
+                    ...c,
+                    durationExpected:
+                      typeof res.durationExpected === 'number'
+                        ? res.durationExpected
+                        : c.durationExpected,
+                    durationMatch:
+                      typeof res.durationMatch === 'boolean' ? res.durationMatch : c.durationMatch,
+                    flagReason: nuevoFlag
+                  }
+                : c
+            );
+            guardarCatalogoLigero(nueva);
+            return nueva;
+          });
+
+          if (!res.fromCache) {
+            await new Promise((r) => setTimeout(r, 1150));
+          }
+        }
+
+        // Ceder el hilo principal entre lotes
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    } finally {
+      validacionMbEnCursoRef.current = false;
     }
   };
 
@@ -2515,6 +2648,13 @@ function App() {
             if (res.migrated > 0) {
               mostrarToast(`✓ Respaldo verificado y ${res.migrated} canciones actualizadas`, 'exito');
             }
+            setTimeout(() => {
+              validarBibliotecaConMusicBrainzEnSegundoPlano(listaMigrada);
+            }, 3000);
+          } else {
+            setTimeout(() => {
+              validarBibliotecaConMusicBrainzEnSegundoPlano(guardado);
+            }, 3000);
           }
         }).catch(() => {});
         return;

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import localforage from 'localforage';
 import {
   esCancionParaRevisar,
+  esAlertaSospechosa,
   descargarArchivoRespaldoBiblioteca,
   type BackupSongMetadata
 } from '../utils/libraryMigration';
@@ -23,6 +24,7 @@ export interface CancionRevisable {
   sourceVersion?: string;
   durationExpected?: number;
   durationActual?: number;
+  durationMatch?: boolean;
   flagReason?: string;
 }
 
@@ -102,7 +104,7 @@ export const RevisarBiblioteca: React.FC<RevisarBibliotecaProps> = ({
     const q = filtroTexto.trim().toLowerCase();
     return biblioteca.filter((c) => {
       if (!esCancionParaRevisar(c)) return false;
-      if (soloConAlerta && !c.flagReason) return false;
+      if (soloConAlerta && !esAlertaSospechosa(c)) return false;
       if (!q) return true;
       return (
         c.nombre.toLowerCase().includes(q) ||
@@ -118,7 +120,7 @@ export const RevisarBiblioteca: React.FC<RevisarBibliotecaProps> = ({
   );
 
   const totalConAlerta = useMemo(
-    () => biblioteca.filter((c) => esCancionParaRevisar(c) && Boolean(c.flagReason)).length,
+    () => biblioteca.filter((c) => esCancionParaRevisar(c) && esAlertaSospechosa(c)).length,
     [biblioteca]
   );
 
@@ -441,7 +443,7 @@ export const RevisarBiblioteca: React.FC<RevisarBibliotecaProps> = ({
 
                 {/* Etiqueta de estado / alerta */}
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                  {cancion.flagReason ? (
+                  {esAlertaSospechosa(cancion) ? (
                     <span
                       style={{
                         backgroundColor: 'rgba(245, 158, 11, 0.2)',
@@ -454,6 +456,33 @@ export const RevisarBiblioteca: React.FC<RevisarBibliotecaProps> = ({
                       }}
                     >
                       ⚠ {cancion.flagReason}
+                    </span>
+                  ) : cancion.flagReason === 'sin datos' ? (
+                    <span
+                      style={{
+                        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                        color: '#9CA3AF',
+                        borderRadius: '999px',
+                        padding: '3px 10px',
+                        fontSize: '11px',
+                        fontWeight: 600
+                      }}
+                    >
+                      Sin datos en MusicBrainz
+                    </span>
+                  ) : cancion.durationMatch === true ? (
+                    <span
+                      style={{
+                        backgroundColor: 'rgba(30, 215, 96, 0.14)',
+                        color: '#6EE7B7',
+                        border: '1px solid rgba(30, 215, 96, 0.3)',
+                        borderRadius: '999px',
+                        padding: '3px 10px',
+                        fontSize: '11px',
+                        fontWeight: 600
+                      }}
+                    >
+                      Duración coincide (±5 s) — Pendiente confirmar
                     </span>
                   ) : (
                     <span
