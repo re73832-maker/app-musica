@@ -22,6 +22,7 @@ import {
   type ProgresoImportacion
 } from './utils/localMusicImporter';
 import {
+  APP_OTA_VERSION,
   notificarOtaLista,
   revisarActualizacionOta,
   type EstadoOta
@@ -2221,7 +2222,7 @@ function App() {
             setEstaOnline(true);
             try {
               const data = await res.json();
-              if (data && data.version && data.version !== 'v5.2.0') {
+              if (data && data.version && data.version.replace(/^v/i, '') !== APP_OTA_VERSION) {
                 setHayNuevaVersionOta(true);
               }
             } catch (_) {}
@@ -2239,7 +2240,7 @@ function App() {
           if (rSw && rSw.ok) {
             const txt = await rSw.text();
             const m = txt.match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/);
-            if (m && m[1] && m[1] !== 'app-musica-v5.2.0') {
+            if (m && m[1] && m[1] !== `app-musica-v${APP_OTA_VERSION}`) {
               setHayNuevaVersionOta(true);
             }
           }
@@ -6880,7 +6881,7 @@ function App() {
   };
 
   // Versión identificadora para verificación visual OTA en vivo
-  const VERSION_APP = 'v5.2.0';
+  const VERSION_APP = `v${APP_OTA_VERSION}`;
 
   // Actualización Total mediante el Botón Interno:
   // Descarga nuevos scripts, purga el CacheStorage / ServiceWorker de forma segura
@@ -11769,7 +11770,7 @@ function App() {
               Dev: <strong style={{ color: '#FFFFFF', fontWeight: '700' }}>JC Sanchez Reyes</strong>
             </p>
             <p style={{ margin: 0, fontSize: '12px', color: '#94A3B8' }}>
-              v5.2.0 • (2026) • Verificación MusicBrainz + Importación Local + Pre-escucha 15s + OTA
+              v{APP_OTA_VERSION} • (2026) • Verificación MusicBrainz + Importación Local + Pre-escucha 15s + OTA
             </p>
           </div>
         </div>

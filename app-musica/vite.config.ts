@@ -9,7 +9,7 @@ export default defineConfig({
       registerType: 'prompt',
       injectRegister: null,
       workbox: {
-        cacheId: 'app-musica-v5.2.0',
+        cacheId: 'app-musica-v5.3.0',
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
