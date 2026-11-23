@@ -5242,59 +5242,7 @@ function App() {
       }
 
       // -----------------------------------------------------------------------
-      // INTENTO 2.B (Canal Directo Móvil): Si Render está bloqueado por YouTube/Cloudflare,
-      // la app conecta directamente a Savenow desde la IP residencial/móvil del usuario
-      // -----------------------------------------------------------------------
-      const audioValidoTrasIntento2 = Boolean(
-        resAudio &&
-        resAudio.ok &&
-        !((resAudio.headers.get('content-type') || '').toLowerCase().includes('text/html'))
-      );
-
-      if (!audioValidoTrasIntento2 && resolvedVideoId && resolvedVideoId.length === 11) {
-        try {
-          setTextoDescarga('Conectando por vía directa móvil de alta velocidad...');
-          const dominios = ['https://p.savenow.to', 'https://loader.to', 'https://p.lbserver.xyz'];
-          const videoUrl = `https://www.youtube.com/watch?v=${resolvedVideoId}`;
-
-          for (const dom of dominios) {
-            try {
-              const startRes = await fetch(`${dom}/api/v2/download?button=1&format=${formatoElegido}&url=${encodeURIComponent(videoUrl)}`, {
-                headers: { 'Accept': 'application/json' }
-              }).then(r => r.json()).catch(() => null);
-
-              if (!startRes || !startRes.id) continue;
-              const progressUrl = startRes.progress_url || `${dom}/api/progress?id=${startRes.id}`;
-
-              for (let i = 0; i < 10; i++) {
-                if (controller.signal.aborted) break;
-                await new Promise(r => setTimeout(r, 700));
-                setTextoDescarga(`Convirtiendo MP3 320k... (${Math.min(95, (i + 1) * 12)}%)`);
-                const pData = await fetch(progressUrl).then(r => r.json()).catch(() => null);
-                if (!pData) continue;
-                const link = pData.download_url || (pData.progress >= 1000 ? pData.url : null);
-                if (link && (pData.success === 1 || pData.success === true || pData.progress >= 1000)) {
-                  const httpsLink = link.replace(/^http:\/\//i, 'https://');
-                  setTextoDescarga('Descargando pista MP3...');
-                  resAudio = await fetch(httpsLink, { signal: controller.signal }).catch(() => null);
-                  if (resAudio && resAudio.ok && !((resAudio.headers.get('content-type') || '').toLowerCase().includes('text/html'))) {
-                    setPasoDescarga(2);
-                    setTextoDescarga('Procesando MP3...');
-                    break;
-                  }
-                }
-                if (pData.text && pData.text.toLowerCase().includes('error')) break;
-              }
-              if (resAudio && resAudio.ok) break;
-            } catch (_) {}
-          }
-        } catch (eDirecto) {
-          console.warn('[Descarga Directa Móvil]: Falló:', eDirecto);
-        }
-      }
-
-      // -----------------------------------------------------------------------
-      // INTENTO 2.C (Fallback Universal): Forzar pipeline vía /api/proxy-stream
+      // INTENTO 2.B (Fallback Universal): Forzar pipeline vía /api/proxy-stream
       // -----------------------------------------------------------------------
       const audioValidoTrasIntento2B = Boolean(
         resAudio &&
@@ -5306,7 +5254,7 @@ function App() {
         console.warn('[Descarga]: Forzando pipeline a través de /api/proxy-stream con reintentos...');
         setTextoDescarga('Extrayendo pista completa con resolvedor universal...');
         const proxyUniversal = obtenerUrlApi(
-          `/api/proxy-stream?videoId=${encodeURIComponent(resolvedVideoId || '')}&q=${encodeURIComponent(`${item.title} ${item.artist || ''}`.trim())}&formato=${encodeURIComponent(formatoElegido)}`
+          `/api/proxy-stream?videoId=${encodeURIComponent(resolvedVideoId || '')}&q=${encodeURIComponent(`${item.title} ${item.artist || ''}`.trim())}&artist=${encodeURIComponent(item.artist || '')}&seconds=${item.seconds || 0}&formato=${encodeURIComponent(formatoElegido)}`
         );
         if (proxyUniversal) {
           try {
@@ -5323,8 +5271,15 @@ function App() {
       }
 
       if (!resAudio || !resAudio.ok) {
+        let mensajeServidor = dataEnlace?.mensaje || '';
+        if (!mensajeServidor && resAudio) {
+          try {
+            const errJson = await resAudio.clone().json().catch(() => null);
+            mensajeServidor = errJson?.mensaje || errJson?.error || '';
+          } catch (_) {}
+        }
         throw new Error(
-          dataEnlace?.mensaje ||
+          mensajeServidor ||
           'No se pudo extraer la pista completa. El servidor o los proveedores externos están ocupados temporalmente. Por favor, intenta de nuevo.'
         );
       }
@@ -14580,7 +14535,7 @@ function App() {
                     Importar Playlist de Spotify
                   </h3>
                   <p style={{ margin: '2px 0 0 0', fontSize: '11.5px', color: '#94A3B8' }}>
-                    Pega el enlace público de Spotify para descargar todas sus canciones en MP3
+                    Pega un enlace de playlist, álbum o canción de Spotify para buscarla y descargarla en MP3
                   </p>
                 </div>
               </div>
@@ -14885,6 +14840,33 @@ function App() {
                           }}>
                             ✓ En biblioteca
                           </span>
+                        )}
+
+                        {!importandoColaSpotify && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const q = `${track.title} ${track.artist || ''}`.trim();
+                              setModalSpotifyAbierto(false);
+                              setTabActiva('buscar');
+                              setBusquedaWeb(q);
+                              buscarCancionesOnline(q);
+                            }}
+                            title="Buscar y descargar manualmente en el buscador"
+                            style={{
+                              background: 'rgba(255, 255, 255, 0.08)',
+                              border: '1px solid rgba(255, 255, 255, 0.15)',
+                              color: '#FFFFFF',
+                              borderRadius: '500px',
+                              padding: '4px 8px',
+                              fontSize: '11px',
+                              cursor: 'pointer',
+                              flexShrink: 0
+                            }}
+                          >
+                            🔍
+                          </button>
                         )}
                       </div>
                     );

@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { LiveUpdate } from '@capawesome/capacitor-live-update';
 import { obtenerUrlApi, fetchConTimeout } from './apiConfig';
 
-export const APP_OTA_VERSION = '5.2.0';
+export const APP_OTA_VERSION = '5.3.0';
 
 export type EstadoOta = 'idle' | 'checking' | 'actualizada' | 'descargando' | 'error';
 
