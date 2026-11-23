@@ -4908,42 +4908,11 @@ function App() {
     };
   }, [detenerPreview, previewActivo?.videoId, previewActivo?.cargando]);
 
-  // Búsqueda pública multi-proveedor de alta resiliencia (Invidious + Apple iTunes)
+  // Búsqueda pública de respaldo (Apple iTunes Search API, sin bloqueos CORS)
   const buscarCancionesPublico = async (consulta: string): Promise<ResultadoBusqueda[]> => {
-    // 1. Probar Invidious (Instancias con CORS abierto)
-    const invidiousHosts = [
-      'https://inv.nadeko.net',
-      'https://invidious.nerdvpn.de',
-      'https://yewtu.be',
-      'https://invidious.jing.rocks'
-    ];
-
-    for (const host of invidiousHosts) {
-      try {
-        const c = new AbortController();
-        const t = setTimeout(() => c.abort(), 4000);
-        const data = await fetchJsonSeguro<any[]>(`${host}/api/v1/search?q=${encodeURIComponent(consulta)}&type=video`, {
-          signal: c.signal,
-          headers: { 'Accept': 'application/json' }
-        });
-        clearTimeout(t);
-        if (Array.isArray(data) && data.length > 0) {
-          return data.slice(0, 25).map((item: any) => ({
-            videoId: item.videoId || '',
-            title: item.title || '',
-            artist: item.author || '',
-            timestamp: `${Math.floor((item.lengthSeconds || 0) / 60)}:${(item.lengthSeconds || 0) % 60 < 10 ? '0' : ''}${(item.lengthSeconds || 0) % 60}`,
-            seconds: item.lengthSeconds || 0,
-            thumbnail: (item.videoThumbnails && item.videoThumbnails[0]) ? item.videoThumbnails[0].url : ''
-          }));
-        }
-      } catch (_) {}
-    }
-
-    // 2. Probar Apple iTunes Search API (Ultra fiable, sin bloqueos de IP ni límites)
     try {
       const c = new AbortController();
-      const t = setTimeout(() => c.abort(), 4500);
+      const t = setTimeout(() => c.abort(), 6000);
       const data = await fetchJsonSeguro<{ results?: any[] }>(`https://itunes.apple.com/search?term=${encodeURIComponent(consulta)}&media=music&entity=song&limit=25`, {
         signal: c.signal
       });
@@ -4995,7 +4964,7 @@ function App() {
       if (urlApi) {
         try {
           const c = new AbortController();
-          const timer = setTimeout(() => c.abort(), 6000);
+          const timer = setTimeout(() => c.abort(), 15000);
           const data = await fetchJsonSeguro<{ resultados?: ResultadoBusqueda[] }>(urlApi, {
             signal: c.signal
           });
